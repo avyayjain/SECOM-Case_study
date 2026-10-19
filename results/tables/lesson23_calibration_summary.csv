@@ -1,0 +1,7 @@
+,,brier_score,brier_score,log_loss,log_loss,average_precision,average_precision,roc_auc,roc_auc,mean_predicted_probability,mean_predicted_probability
+,,mean,std,mean,std,mean,std,mean,std,mean,std
+model,calibration,,,,,,,,,,
+Random Forest,Sigmoid calibrated,0.0589,0.001,0.2231,0.0029,0.207,0.0342,0.7496,0.0125,0.0667,0.003
+Random Forest,Uncalibrated,0.059,0.0008,0.2247,0.0037,0.2118,0.0462,0.7304,0.0373,0.0742,0.002
+XGBoost,Sigmoid calibrated,0.0596,0.0007,0.229,0.0025,0.2,0.0333,0.7152,0.024,0.0669,0.0033
+XGBoost,Uncalibrated,0.0642,0.0034,0.2472,0.0124,0.1876,0.0229,0.7064,0.0356,0.0727,0.0076

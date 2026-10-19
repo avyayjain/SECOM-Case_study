@@ -1,0 +1,8 @@
+step,options_considered,pros_cons,decision,before,after,removed
+Remove features above missingness threshold,"55%, 60%, 70%; inspect missingness distribution",Lower threshold reduces more incomplete features but may discard useful signals,Remove features with > 60% missing values,590,566,24
+Remove constant features,Keep all / remove zero-variance features,Constant features provide no separation; removal is low risk,Remove zero-variance features,566,450,116
+Remove duplicate features,Keep duplicates / keep one copy,Duplicate columns add redundancy without new information,Keep first copy of each exact duplicate,450,450,0
+Outlier handling,Leave / cap at 3σ / remove rows,Capping limits extreme influence without discarding scarce faulty examples,Cap values at training mean ± 3 standard deviations,450,450,0
+Missing-value imputation,Mean (prohibited by manual) / median / kNN,kNN uses similarity between observations; requires scaling and can be slower,Min-max scale then kNN imputation with k=5,450,450,0
+Feature selection,Filter / wrapper / embedded / Boruta,Filter is fast; wrapper/embedded methods can capture model-specific relevance but cost more,Select up to 20 features using ANOVA F-score within the training pipeline,450,20,430
+Class imbalance,SMOTE / undersampling / class weighting,SMOTE creates synthetic minority examples; must only be used during training,SMOTE on training folds only,1253,Balanced inside model fitting only,0

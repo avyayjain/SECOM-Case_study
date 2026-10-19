@@ -1,0 +1,7 @@
+metric,value
+rows,1567.0
+sensor_features,590.0
+faulty_count,104.0
+good_count,1463.0
+faulty_percentage,6.637
+total_missing_values,41951.0

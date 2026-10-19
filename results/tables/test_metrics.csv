@@ -1,0 +1,2 @@
+decision_threshold_selected_from_training_cv,accuracy,precision_faulty,sensitivity_recall_faulty,specificity_good,f1_faulty,roc_auc,average_precision,true_negatives_good_correct,false_positives_false_alarms,false_negatives_missed_faults,true_positives_faults_caught,cost_type_i_100_type_ii_400,majority_class_baseline_accuracy
+0.62,0.9203821656050956,0.3,0.14285714285714285,0.9761092150170648,0.1935483870967742,0.7367137981472452,0.24885383692472862,286,7,18,3,7900,0.9331210191082803
