@@ -934,4 +934,3 @@ async def predict_csv(file: UploadFile = File(...)):
         )
     finally:
         await file.close()
-

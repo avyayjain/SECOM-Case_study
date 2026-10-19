@@ -4,8 +4,9 @@ import requests
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import os
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = st.secrets.get("API_URL")
 
 st.set_page_config(
     page_title="SECOM Case Study",
