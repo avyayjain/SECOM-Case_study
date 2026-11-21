@@ -1,14 +1,32 @@
 {
   "test_samples": 314,
   "test_faults": 21,
-  "threshold": 0.11999999999999998,
-  "true_negatives": 262,
-  "false_positives": 31,
+  "threshold": 0.495,
+  "true_negatives": 272,
+  "false_positives": 21,
   "false_negatives": 13,
   "true_positives": 8,
-  "average_precision": 0.24376271284900997,
-  "balanced_accuracy": 0.6375751665854055,
-  "precision": 0.20512820512820512,
+  "accuracy": 0.89171974522293,
+  "balanced_accuracy": 0.6546400130017878,
+  "sensitivity_recall": 0.38095238095238093,
   "recall": 0.38095238095238093,
-  "f1": 0.26666666666666666
+  "specificity": 0.9283276450511946,
+  "precision": 0.27586206896551724,
+  "f1": 0.32,
+  "f2": 0.35398230088495575,
+  "roc_auc": 0.7502031529335283,
+  "average_precision": 0.20562794072484664,
+  "total_cost": 7300,
+  "manufacturing_cost_eur": 69200,
+  "cost_assumptions": {
+    "type_i_false_positive": 100,
+    "type_ii_false_negative": 400,
+    "mfg_type_i_cost": 200,
+    "mfg_type_ii_cost": 5000
+  },
+  "best_parameters": {
+    "classifier__max_depth": 10,
+    "classifier__min_samples_leaf": 2,
+    "classifier__n_estimators": 100
+  }
 }
