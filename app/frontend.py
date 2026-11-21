@@ -726,69 +726,159 @@ if final_model:
     t_cm = final_model.get("training_confusion_matrix", [])
     cm = final_model.get("confusion_matrix", {})
 
-    # 1. Model Confusion Matrix Heatmaps (Training vs Test)
-    st.subheader("1. Model Confusion Matrix Visual Heatmaps (Training vs. Test)")
-    cm_col1, cm_col2 = st.columns(2)
+    # 1. Held-Out Test Confusion Matrix (Like Previous + Upgraded Colors & Visuals)
+    st.subheader("1. Held-Out Test Confusion Matrix (314 Wafers — Primary Fab Target)")
+    st.caption("Evaluated at operating threshold 0.340 | Cost: €100 / False Alarm, €400 / Missed Defect")
 
-    with cm_col1:
-        st.markdown("#### Training Confusion Matrix (1,253 Wafers)")
-        z_tr = [[989, 181], [0, 83]]
-        text_tr = [
-            ["TN: 989<br/>(84.5% Passes Cleared)", "FP: 181<br/>(False Alarms: €18.1k)"],
-            ["FN: 0<br/>(0 Escaped Defects)", "TP: 83<br/>(100.0% Recall: Caught)"]
-        ]
-        fig_cm_tr = go.Figure(data=go.Heatmap(
-            z=z_tr,
-            x=["Predicted Pass", "Predicted Defect"],
-            y=["Actual Pass", "Actual Defect"],
-            text=text_tr,
-            texttemplate="%{text}",
-            textfont={"size": 13, "color": "white"},
-            colorscale="Tealgrn",
-            showscale=False,
-        ))
-        fig_cm_tr.update_layout(
-            title="Training Confusion Matrix (Threshold: 0.340)",
-            height=280,
-            margin=dict(l=20, r=20, t=35, b=20),
-        )
-        st.plotly_chart(fig_cm_tr, use_container_width=True)
+    tn_val = cm.get("true_negatives", 244)
+    fp_val = cm.get("false_positives", 49)
+    fn_val = cm.get("false_negatives", 10)
+    tp_val = cm.get("true_positives", 11)
 
-        c_tr1, c_tr2 = st.columns(2)
-        c_tr1.metric("Training Recall", "100.0%", "83/83 caught")
-        c_tr2.metric("Training Total Cost", "€18,100", "FP: €18.1k, FN: €0")
+    # 4 Native Metric Widgets (Exactly like previous version)
+    col_cm1, col_cm2, col_cm3, col_cm4 = st.columns(4)
+    col_cm1.metric("True Negatives (TN)", f"{tn_val}", f"83.3% Specificity (€0 cost)")
+    col_cm2.metric("False Positives (FP)", f"{fp_val}", f"False Alarms (€{fp_val * 100:,})")
+    col_cm3.metric("False Negatives (FN)", f"{fn_val}", f"Escaped Defects (€{fn_val * 400:,})")
+    col_cm4.metric("True Positives (TP)", f"{tp_val}", f"52.38% Recall ({tp_val}/21 caught)")
 
-    with cm_col2:
-        st.markdown("#### Held-Out Test Confusion Matrix (314 Wafers)")
-        tn_val = cm.get("true_negatives", 244)
-        fp_val = cm.get("false_positives", 49)
-        fn_val = cm.get("false_negatives", 10)
-        tp_val = cm.get("true_positives", 11)
+    # Visual Matrix + Native Dataframe side-by-side
+    cm_vis_col1, cm_tab_col1 = st.columns([1.1, 1.0])
+
+    with cm_vis_col1:
+        # Interactive Plotly Confusion Matrix with modern colors & clear annotations
         z_te = [[tn_val, fp_val], [fn_val, tp_val]]
-        text_te = [
-            [f"TN: {tn_val}<br/>(83.3% Passes Cleared)", f"FP: {fp_val}<br/>(False Alarms: €4.9k)"],
-            [f"FN: {fn_val}<br/>(Escaped Defects: €4.0k)", f"TP: {tp_val}<br/>(52.4% Recall: Caught)"]
-        ]
-        fig_cm_te = go.Figure(data=go.Heatmap(
+        fig_te = go.Figure(data=go.Heatmap(
             z=z_te,
             x=["Predicted Pass", "Predicted Defect"],
             y=["Actual Pass", "Actual Defect"],
-            text=text_te,
-            texttemplate="%{text}",
-            textfont={"size": 13, "color": "white"},
-            colorscale="Blues",
+            colorscale=[[0, "#e0f2fe"], [0.25, "#7dd3fc"], [0.6, "#0284c7"], [1, "#0369a1"]],
             showscale=False,
+            hoverinfo="text",
+            hovertext=[
+                [f"Actual Pass → Predicted Pass: {tn_val} wafers (Pass Cleared, Cost: €0)",
+                 f"Actual Pass → Predicted Defect: {fp_val} wafers (False Alarm, Cost: €{fp_val*100:,})"],
+                [f"Actual Defect → Predicted Pass: {fn_val} wafers (Escaped Defect, Cost: €{fn_val*400:,})",
+                 f"Actual Defect → Predicted Defect: {tp_val} wafers (Caught Defect, 52.38% Recall)"]
+            ]
         ))
-        fig_cm_te.update_layout(
-            title="Held-Out Test Confusion Matrix (Threshold: 0.340)",
-            height=280,
+        annotations_te = [
+            dict(x="Predicted Pass", y="Actual Pass", text=f"<b>TN: {tn_val}</b><br>Pass Cleared (€0)", showarrow=False, font=dict(color="#ffffff", size=13, family="Arial")),
+            dict(x="Predicted Defect", y="Actual Pass", text=f"<b>FP: {fp_val}</b><br>False Alarm (€{fp_val*100:,})", showarrow=False, font=dict(color="#0f172a", size=13, family="Arial")),
+            dict(x="Predicted Pass", y="Actual Defect", text=f"<b>FN: {fn_val}</b><br>Missed Defect (€{fn_val*400:,})", showarrow=False, font=dict(color="#0f172a", size=13, family="Arial")),
+            dict(x="Predicted Defect", y="Actual Defect", text=f"<b>TP: {tp_val}</b><br>Caught (52.4% Recall)", showarrow=False, font=dict(color="#0f172a", size=13, family="Arial")),
+        ]
+        fig_te.update_layout(
+            title=dict(text="Held-Out Test Confusion Matrix Heatmap (N=314)", font=dict(size=14)),
+            annotations=annotations_te,
+            height=260,
             margin=dict(l=20, r=20, t=35, b=20),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig_cm_te, use_container_width=True)
+        fig_te.update_yaxes(autorange="reversed")
+        st.plotly_chart(fig_te, use_container_width=True)
+
+    with cm_tab_col1:
+        st.caption("Native Data Table (Test Set):")
+        confusion_test_df = pd.DataFrame(
+            [
+                {
+                    "Actual Class": "Actual Pass (293 wafers)",
+                    "Predicted Pass": f"{tn_val} (TN) — Cleared (€0)",
+                    "Predicted Defect": f"{fp_val} (FP) — False Alarm (€{fp_val*100:,})",
+                    "Total Wafers": 293,
+                },
+                {
+                    "Actual Class": "Actual Defect (21 wafers)",
+                    "Predicted Pass": f"{fn_val} (FN) — Missed Defect (€{fn_val*400:,})",
+                    "Predicted Defect": f"{tp_val} (TP) — Caught ({tp_val/21*100:.1f}%)",
+                    "Total Wafers": 21,
+                },
+            ]
+        )
+        st.dataframe(confusion_test_df, use_container_width=True, hide_index=True)
 
         c_te1, c_te2 = st.columns(2)
-        c_te1.metric("Test Recall", "52.38%", f"{tp_val}/21 caught")
-        c_te2.metric("Test Total Cost", "€8,900", "FP: €4.9k, FN: €4.0k")
+        c_te1.metric("Test Defect Recall", "52.38%", f"{tp_val} / 21 faults caught")
+        c_te2.metric("Test Total Inspection Cost", f"€{metrics.get('total_cost', 8900):,}", f"FP: €{fp_val*100:,}, FN: €{fn_val*400:,}")
+
+    st.markdown("<br/>", unsafe_allow_html=True)
+
+    # 2. Training Confusion Matrix (In-Sample Baseline)
+    st.subheader("2. Training Confusion Matrix (1,253 Wafers — In-Sample Baseline)")
+    st.caption("Evaluated at operating threshold 0.340 (SMOTE-augmented training baseline):")
+
+    tn_tr = 989
+    fp_tr = 181
+    fn_tr = 0
+    tp_tr = 83
+
+    col_tr1, col_tr2, col_tr3, col_tr4 = st.columns(4)
+    col_tr1.metric("True Negatives (TN)", f"{tn_tr}", "84.5% Specificity (€0 cost)")
+    col_tr2.metric("False Positives (FP)", f"{fp_tr}", f"False Alarms (€{fp_tr * 100:,})")
+    col_tr3.metric("False Negatives (FN)", f"{fn_tr}", "0 Missed Defects (€0 cost)")
+    col_tr4.metric("True Positives (TP)", f"{tp_tr}", f"100.0% Recall (All 83 Caught)")
+
+    cm_vis_col2, cm_tab_col2 = st.columns([1.1, 1.0])
+
+    with cm_vis_col2:
+        # Interactive Plotly Confusion Matrix for Training with Emerald/Teal colors
+        z_tr = [[tn_tr, fp_tr], [fn_tr, tp_tr]]
+        fig_tr = go.Figure(data=go.Heatmap(
+            z=z_tr,
+            x=["Predicted Pass", "Predicted Defect"],
+            y=["Actual Pass", "Actual Defect"],
+            colorscale=[[0, "#ecfdf5"], [0.25, "#a7f3d0"], [0.6, "#10b981"], [1, "#047857"]],
+            showscale=False,
+            hoverinfo="text",
+            hovertext=[
+                [f"Actual Pass → Predicted Pass: {tn_tr} wafers (Pass Cleared, Cost: €0)",
+                 f"Actual Pass → Predicted Defect: {fp_tr} wafers (False Alarm, Cost: €{fp_tr*100:,})"],
+                [f"Actual Defect → Predicted Pass: {fn_tr} wafers (Escaped Defect: 0, Cost: €0)",
+                 f"Actual Defect → Predicted Defect: {tp_tr} wafers (Caught: 83, 100.0% Recall)"]
+            ]
+        ))
+        annotations_tr = [
+            dict(x="Predicted Pass", y="Actual Pass", text=f"<b>TN: {tn_tr}</b><br>Pass Cleared (€0)", showarrow=False, font=dict(color="#ffffff", size=13, family="Arial")),
+            dict(x="Predicted Defect", y="Actual Pass", text=f"<b>FP: {fp_tr}</b><br>False Alarm (€{fp_tr*100:,})", showarrow=False, font=dict(color="#0f172a", size=13, family="Arial")),
+            dict(x="Predicted Pass", y="Actual Defect", text=f"<b>FN: {fn_tr}</b><br>0 Missed Defects (€0)", showarrow=False, font=dict(color="#0f172a", size=13, family="Arial")),
+            dict(x="Predicted Defect", y="Actual Defect", text=f"<b>TP: {tp_tr}</b><br>Caught (100.0% Recall)", showarrow=False, font=dict(color="#0f172a", size=13, family="Arial")),
+        ]
+        fig_tr.update_layout(
+            title=dict(text="Training Confusion Matrix Heatmap (N=1,253)", font=dict(size=14)),
+            annotations=annotations_tr,
+            height=260,
+            margin=dict(l=20, r=20, t=35, b=20),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        fig_tr.update_yaxes(autorange="reversed")
+        st.plotly_chart(fig_tr, use_container_width=True)
+
+    with cm_tab_col2:
+        st.caption("Native Data Table (Training Set):")
+        confusion_train_df = pd.DataFrame(
+            [
+                {
+                    "Actual Class": "Actual Pass (1,170 wafers)",
+                    "Predicted Pass": f"{tn_tr} (TN) — Cleared (€0)",
+                    "Predicted Defect": f"{fp_tr} (FP) — False Alarm (€{fp_tr*100:,})",
+                    "Total Wafers": 1170,
+                },
+                {
+                    "Actual Class": "Actual Defect (83 wafers)",
+                    "Predicted Pass": f"{fn_tr} (FN) — Missed Defect (€0)",
+                    "Predicted Defect": f"{tp_tr} (TP) — Caught (100.0%)",
+                    "Total Wafers": 83,
+                },
+            ]
+        )
+        st.dataframe(confusion_train_df, use_container_width=True, hide_index=True)
+
+        c_tr1, c_tr2 = st.columns(2)
+        c_tr1.metric("Training Defect Recall", "100.0%", "83 / 83 faults caught")
+        c_tr2.metric("Training Total Inspection Cost", "€18,100", "FP: €18.1k, FN: €0")
 
     st.divider()
 
