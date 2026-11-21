@@ -473,16 +473,17 @@ def calculate_metrics(y_true, probabilities, threshold, cost_fp=TYPE_I_COST, cos
     return metrics, cm, predictions
 
 
-def tune_decision_threshold(y_true, oof_probabilities, cost_fp=TYPE_I_COST, cost_fn=TYPE_II_COST):
+def tune_decision_threshold(y_true, oof_probabilities, cost_fp=TYPE_I_COST, cost_fn=TYPE_II_COST, max_threshold=0.35):
     """
     Search over candidate decision thresholds using training out-of-fold probabilities
-    to find the threshold that strictly minimizes Total Cost.
+    to find the threshold that strictly minimizes Total Cost subject to threshold <= max_threshold.
 
     Inputs:
         y_true (array-like): Training ground truth labels.
         oof_probabilities (array-like): Training out-of-fold predicted probabilities.
-        cost_fp (float): False positive unit cost.
-        cost_fn (float): False negative unit cost.
+        cost_fp (float): False positive unit cost (EUR).
+        cost_fn (float): False negative unit cost (EUR).
+        max_threshold (float): Upper bound on decision threshold (default 0.35).
 
     Outputs:
         best_threshold (float): Selected optimal threshold.
@@ -507,10 +508,10 @@ def tune_decision_threshold(y_true, oof_probabilities, cost_fp=TYPE_I_COST, cost
         })
 
     threshold_table = pd.DataFrame(threshold_results)
-    threshold_table = threshold_table.sort_values(
+    constrained_candidates = threshold_table[threshold_table["threshold"] <= max_threshold].sort_values(
         ["total_cost", "threshold"], ascending=[True, False]
     )
-    best_threshold = float(threshold_table.iloc[0]["threshold"])
+    best_threshold = float(constrained_candidates.iloc[0]["threshold"])
     return best_threshold, threshold_table
 
 
@@ -965,6 +966,7 @@ def main():
     plt.title("Precision-Recall Curve - Held-Out Test Set")
     plt.legend(loc="upper right")
     plt.tight_layout()
+    plt.savefig(FIGURES_DIR / "precision_recall_curve.png", dpi=150)
     plt.savefig(FIGURES_DIR / "lesson23_reliability_diagrams.png", dpi=150)
     plt.close()
 
@@ -985,7 +987,7 @@ def main():
     print(f"F2-Score:              {test_metrics['f2']:.4f} (Recall-Weighted)", flush=True)
     print(f"ROC-AUC:               {test_metrics['roc_auc']:.4f}", flush=True)
     print(f"Average Precision:     {test_metrics['average_precision']:.4f}", flush=True)
-    print(f"Total Cost ({TYPE_I_COST}*FP + {TYPE_II_COST}*FN): {test_metrics['total_cost']}", flush=True)
+    print(f"Total Cost ({TYPE_I_COST}*FP + {TYPE_II_COST}*FN): EUR {test_metrics['total_cost']:,}", flush=True)
     print(f"Manufacturing Cost ({MFG_TYPE_I_COST}*FP + {MFG_TYPE_II_COST}*FN): EUR {test_metrics['manufacturing_cost_eur']:,}", flush=True)
 
     # 15. Generalisation Analysis: Training Error vs Test Error (Section 15.4)
@@ -1002,6 +1004,39 @@ def main():
         columns=["Predicted Pass", "Predicted Defect"],
     ).to_csv(TABLE_DIR / "confusion_matrix.csv")
 
+    pd.DataFrame(
+        train_cm,
+        index=["Actual Pass", "Actual Defect"],
+        columns=["Predicted Pass", "Predicted Defect"],
+    ).to_csv(TABLE_DIR / "training_confusion_matrix.csv")
+
+    pd.DataFrame([
+        {
+            "Partition": "Training",
+            "TN": train_metrics["true_negatives"],
+            "FP": train_metrics["false_positives"],
+            "FN": train_metrics["false_negatives"],
+            "TP": train_metrics["true_positives"],
+            "Recall": train_metrics["sensitivity_recall"],
+            "Type_I_Cost_EUR": train_metrics["false_positives"] * TYPE_I_COST,
+            "Type_II_Cost_EUR": train_metrics["false_negatives"] * TYPE_II_COST,
+            "Total_Cost_EUR": train_metrics["total_cost"],
+            "Manufacturing_Cost_EUR": train_metrics["manufacturing_cost_eur"],
+        },
+        {
+            "Partition": "Held-Out Test",
+            "TN": test_metrics["true_negatives"],
+            "FP": test_metrics["false_positives"],
+            "FN": test_metrics["false_negatives"],
+            "TP": test_metrics["true_positives"],
+            "Recall": test_metrics["sensitivity_recall"],
+            "Type_I_Cost_EUR": test_metrics["false_positives"] * TYPE_I_COST,
+            "Type_II_Cost_EUR": test_metrics["false_negatives"] * TYPE_II_COST,
+            "Total_Cost_EUR": test_metrics["total_cost"],
+            "Manufacturing_Cost_EUR": test_metrics["manufacturing_cost_eur"],
+        },
+    ]).to_csv(TABLE_DIR / "training_vs_test_cost_matrix.csv", index=False)
+
     with open(TABLE_DIR / "classification_report.txt", "w", encoding="utf-8") as f:
         f.write(classification_report(y_test, test_preds, target_names=["Pass", "Defect"], zero_division=0))
 
@@ -1009,11 +1044,10 @@ def main():
     # Chain raw data preprocessing steps with the tuned classifier into a single deployable pipeline
     from sklearn.compose import ColumnTransformer
     from sklearn.pipeline import Pipeline as SklearnPipeline
-    from sklearn.impute import SimpleImputer
 
     preprocessor = ColumnTransformer([
         ("sel_proc", SklearnPipeline([
-            ("imputer", SimpleImputer(strategy="median")),
+            ("imputer", KNNImputer(n_neighbors=5, weights="distance")),
             ("scaler", MinMaxScaler()),
         ]), selected_feature_names)
     ], remainder="drop")

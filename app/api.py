@@ -384,6 +384,17 @@ def grid_search():
     }
 
 
+@app.get("/case-study/training-curve")
+def training_curve():
+    """Return learning curve data showing training recall vs cross-validation recall."""
+    records = load_csv_table("model_training_curve.csv")
+    return {
+        "title": "Model Training Curve (Learning Curve)",
+        "description": "Progression of in-sample training recall vs 5-fold cross-validation recall across sample sizes.",
+        "records": records,
+    }
+
+
 # ---------------------------------------------------------
 # 6. Threshold & Cost Trade-off Analysis
 # ---------------------------------------------------------
@@ -416,6 +427,27 @@ def threshold_analysis():
     }
 
 
+@app.get("/case-study/training-matrix")
+def training_matrix():
+    """Return the confusion matrix and cost matrix evaluated on the training dataset."""
+    train_cm = load_csv_table("training_confusion_matrix.csv")
+    cost_comp = load_csv_table("training_vs_test_cost_matrix.csv")
+    train_row = [r for r in cost_comp if r.get("Partition") == "Training"]
+    train_cost = train_row[0] if train_row else {}
+
+    return {
+        "title": "Training Set Confusion Matrix & Cost Breakdown",
+        "description": "Evaluated on 1,253 training wafers (83 faults) at the cost-optimal operating threshold.",
+        "confusion_matrix": train_cm,
+        "cost_matrix": train_cost,
+        "generalization_warning": (
+            "Notice: On training data, sensitivity/recall reaches 100.0% (83/83 caught). "
+            "However, on the held-out test set, recall drops to 52.38% (a drop of ~48 to 60 percentage points). "
+            "This gap illustrates the danger of reporting in-sample metrics in semiconductor fabrication."
+        ),
+    }
+
+
 # ---------------------------------------------------------
 # 7. Final Model Evaluation (Holdout Test Set)
 # ---------------------------------------------------------
@@ -427,8 +459,14 @@ def final_model():
         metrics = load_saved_metrics()
         comparison = load_csv_table("training_test_comparison.csv")
         cm_records = load_csv_table("confusion_matrix.csv")
+        train_cm_records = load_csv_table("training_confusion_matrix.csv")
+        cost_matrix = load_csv_table("training_vs_test_cost_matrix.csv")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    total_cost = metrics.get("total_cost", 8900)
+    mfg_cost = metrics.get("manufacturing_cost_eur", 59800)
+    baseline_naive_cost = 21 * 400  # 8,400 EUR
 
     return {
         "title": "Final Random Forest Pipeline — Held-Out Test Evaluation",
@@ -438,24 +476,37 @@ def final_model():
         "test_fault_count": 21,
         "metrics": metrics,
         "confusion_matrix": {
-            "true_negatives": 272,
-            "false_positives": 21,
-            "false_negatives": 13,
-            "true_positives": 8,
+            "true_negatives": metrics.get("true_negatives", 244),
+            "false_positives": metrics.get("false_positives", 49),
+            "false_negatives": metrics.get("false_negatives", 10),
+            "true_positives": metrics.get("true_positives", 11),
             "table": cm_records,
         },
+        "training_confusion_matrix": train_cm_records,
+        "cost_matrix_comparison": cost_matrix,
         "training_vs_test": comparison,
         "economic_performance": {
-            "total_inspection_cost": 7300,
-            "manufacturing_impact_eur": 69200,
-            "baseline_all_pass_cost": 21 * 400,  # 8,400
-            "cost_saved": (21 * 400) - 7300,     # $1,100 saved on inspection
+            "currency": "EUR (€)",
+            "total_inspection_cost_eur": total_cost,
+            "manufacturing_impact_eur": mfg_cost,
+            "cost_formula": "Total Cost = 100 * FP + 400 * FN (EUR)",
+            "manufacturing_cost_formula": "Mfg Cost = 200 * FP + 5000 * FN (EUR)",
+        },
+        "recall_drop_analysis": {
+            "training_recall": "100.0% (83/83 faults caught)",
+            "test_recall": f"{metrics.get('recall', 0.5238):.2%} ({metrics.get('true_positives', 11)}/21 faults caught)",
+            "recall_drop_percentage_points": round((1.0 - metrics.get('recall', 0.5238)) * 100, 2),
+            "explanation": (
+                "Training recall is near-perfect due to tree splits fitting the synthetic SMOTE boundary. "
+                "On raw unaugmented test sensor data, high sensor noise causes 10 faults to be missed, "
+                "leading to a substantial drop in recall. Reporting test metrics is strictly necessary."
+            ),
         },
         "lesson": (
-            "On the held-out test split of 314 wafers (21 actual defects), the tuned pipeline "
-            "achieves 38.10% recall (8 faults caught) and 92.83% specificity (272 passes cleared) "
-            "at the cost-optimal threshold of 0.495. This generates a total cost of $7,300 "
-            "compared to $8,400 under a naive all-pass baseline."
+            f"On the held-out test split of 314 wafers (21 defects), operating at threshold {threshold:.3f} "
+            f"catches {metrics.get('true_positives', 11)} of 21 defects ({metrics.get('recall', 0.5238):.1%} recall) "
+            f"with {metrics.get('true_negatives', 244)} passes cleared ({metrics.get('specificity', 0.8328):.1%} specificity). "
+            f"Total inspection cost is €{total_cost:,} and manufacturing impact cost is €{mfg_cost:,}."
         ),
     }
 

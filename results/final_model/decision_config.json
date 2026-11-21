@@ -1,7 +1,7 @@
 {
   "model": "Boruta + MinMaxScaler + SMOTE + RandomForest",
-  "threshold": 0.495,
-  "decision_threshold": 0.495,
+  "threshold": 0.34,
+  "decision_threshold": 0.34,
   "positive_class": 1,
   "negative_class": 0,
   "feature_columns": [
