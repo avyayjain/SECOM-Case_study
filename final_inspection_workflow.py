@@ -85,9 +85,14 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.dummy import DummyClassifier
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+)
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -578,20 +583,16 @@ def run_boruta_selection(X_train_imputed, y_train, target_count=20):
 # 7. Candidate Models Comparison (Manual Section 11)
 # ===========================================================================
 
-def compare_candidate_models(X_train_sel, y_train, cv):
+def compare_candidate_models(X_train_sel, y_train, cv, X_test_sel=None, y_test=None):
     """
     Establish a DummyClassifier baseline and evaluate multiple candidate models
-    under identical conditions (scaling, SMOTE) via 5-fold Stratified CV.
+    under identical conditions (scaling, SMOTE) via 5-fold Stratified CV
+    and held-out test evaluation.
 
-    Inputs:
-        X_train_sel (pd.DataFrame): Training features on Boruta selected sensors.
-        y_train (pd.Series): Training labels.
-        cv (StratifiedKFold): Cross-validation splitter.
-
-    Outputs:
-        comp_df (pd.DataFrame): Comparison table with mean and std recall.
+    Generates and saves full 2x2 confusion matrices and economic cost matrices (EUR €)
+    for all candidate algorithms into both data/ and results/tables/.
     """
-    print("\n[Model Comparison] Evaluating candidate models on 5-fold CV (Section 11)...", flush=True)
+    print("\n[Model Comparison] Evaluating candidate models on 5-fold CV & Test Set (Section 11)...", flush=True)
 
     prep_pipeline = ImbPipeline([
         ("scaler", MinMaxScaler()),
@@ -599,36 +600,214 @@ def compare_candidate_models(X_train_sel, y_train, cv):
     ])
 
     candidates = {
-        "Dummy (most_frequent)": DummyClassifier(strategy="most_frequent"),
+        "Random Forest": RandomForestClassifier(n_estimators=100, min_samples_leaf=2, max_depth=10, random_state=RANDOM_STATE, n_jobs=-1),
+        "SVM (RBF)": SVC(probability=True, kernel="rbf", random_state=RANDOM_STATE),
+        "LightGBM-style": HistGradientBoostingClassifier(random_state=RANDOM_STATE),
+        "Gradient Boosting": GradientBoostingClassifier(random_state=RANDOM_STATE),
         "Logistic Regression": LogisticRegression(max_iter=1000, random_state=RANDOM_STATE),
-        "Random Forest": RandomForestClassifier(n_estimators=100, min_samples_leaf=2, random_state=RANDOM_STATE, n_jobs=-1),
-        "Support Vector Machine (SVC)": SVC(probability=True, random_state=RANDOM_STATE),
+        "KNN (k = 31)": KNeighborsClassifier(n_neighbors=31),
         "XGBoost": XGBClassifier(n_estimators=100, max_depth=4, random_state=RANDOM_STATE, eval_metric="logloss"),
+        "Dummy (most_frequent)": DummyClassifier(strategy="most_frequent"),
     }
 
-    comparison_records = []
+    confusion_records = []
+    cost_records = []
+    rigorous_records = []
+
     for name, model in candidates.items():
         pipe = ImbPipeline(prep_pipeline.steps + [("classifier", model)])
-        try:
-            scores = cross_val_score(pipe, X_train_sel, y_train, cv=cv, scoring="recall", n_jobs=-1)
-            f1_scores = cross_val_score(pipe, X_train_sel, y_train, cv=cv, scoring="f1", n_jobs=-1)
-            mean_rec, std_rec = float(scores.mean()), float(scores.std())
-            mean_f1, std_f1 = float(f1_scores.mean()), float(f1_scores.std())
-        except Exception as err:
-            mean_rec, std_rec, mean_f1, std_f1 = 0.0, 0.0, 0.0, 0.0
+        
+        # 1. 5-Fold Cross Validation Out-Of-Fold Predictions
+        if name == "Dummy (most_frequent)":
+            oof_proba = np.zeros(len(y_train), dtype=float)
+            oof_pred = np.zeros(len(y_train), dtype=int)
+            auc = 0.5
+        else:
+            oof_proba = cross_val_predict(pipe, X_train_sel, y_train, cv=cv, method="predict_proba", n_jobs=-1)[:, 1]
+            oof_pred = (oof_proba >= 0.5).astype(int)
+            try:
+                auc = float(roc_auc_score(y_train, oof_proba))
+            except Exception:
+                auc = 0.5
+        
+        cm_05 = confusion_matrix(y_train, oof_pred, labels=[0, 1])
+        tn, fp, fn, tp = cm_05.ravel()
+        rec = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        spec = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+        prec = float(precision_score(y_train, oof_pred, zero_division=0))
+        f1 = float(f1_score(y_train, oof_pred, zero_division=0))
+        acc = float(accuracy_score(y_train, oof_pred))
+        
+        cost_fp = int(TYPE_I_COST * fp)
+        cost_fn = int(TYPE_II_COST * fn)
+        total_cost = cost_fp + cost_fn
+        baseline_cost_train = int(len(y_train[y_train == 1]) * TYPE_II_COST)
+        net_savings_train = baseline_cost_train - total_cost
 
-        comparison_records.append({
-            "model": name,
-            "mean_recall": round(mean_rec, 4),
-            "std_recall": round(std_rec, 4),
-            "mean_f1": round(mean_f1, 4),
-            "std_f1": round(std_f1, 4),
+        confusion_records.append({
+            "Partition": "5-Fold CV (Train, N=1253)",
+            "Model": name,
+            "Cutoff_Threshold": 0.50,
+            "TN": int(tn),
+            "FP": int(fp),
+            "FN": int(fn),
+            "TP": int(tp),
+            "Accuracy": round(acc, 4),
+            "Recall_Sensitivity": round(rec, 4),
+            "Specificity": round(spec, 4),
+            "Precision": round(prec, 4),
+            "F1_Score": round(f1, 4),
+            "ROC_AUC": round(auc, 4),
         })
-        print(f" - {name:30s} | Recall: {mean_rec:.4f} +/- {std_rec:.4f} | F1: {mean_f1:.4f}", flush=True)
 
-    comp_df = pd.DataFrame(comparison_records)
-    comp_df.to_csv(TABLE_DIR / "rigorous_model_comparison.csv", index=False)
-    return comp_df
+        cost_records.append({
+            "Partition": "5-Fold CV (Train, N=1253)",
+            "Model": name,
+            "Cutoff_Threshold": 0.50,
+            "False_Alarms_FP": int(fp),
+            "False_Alarm_Cost_EUR": cost_fp,
+            "Missed_Faults_FN": int(fn),
+            "Missed_Fault_Cost_EUR": cost_fn,
+            "Total_Inspection_Cost_EUR": total_cost,
+            "Baseline_Flag_Nothing_EUR": baseline_cost_train,
+            "Net_Savings_EUR": net_savings_train,
+            "Economic_Status": f"EUR {abs(net_savings_train):,} " + ("SAVINGS" if net_savings_train >= 0 else "LOSS vs Do-Nothing"),
+        })
+
+        rigorous_records.append({
+            "model": name,
+            "roc_auc": round(auc, 4),
+            "mean_recall": round(rec, 4),
+            "precision": round(prec, 4),
+            "mean_f1": round(f1, 4),
+            "missed_faults": int(fn),
+            "false_alarms": int(fp),
+            "total_cost_eur": total_cost,
+        })
+
+        # 2. Optimal Threshold Search on CV
+        if name != "Dummy (most_frequent)":
+            best_th = 0.50
+            min_c = total_cost
+            best_th_metrics = (tn, fp, fn, tp, rec, spec, prec, f1, acc)
+            for th_cand in np.arange(0.10, 0.91, 0.02):
+                c_pred = (oof_proba >= th_cand).astype(int)
+                c_cm = confusion_matrix(y_train, c_pred, labels=[0, 1])
+                c_tn, c_fp, c_fn, c_tp = c_cm.ravel()
+                c_cost = TYPE_I_COST * c_fp + TYPE_II_COST * c_fn
+                if c_cost < min_c:
+                    min_c = c_cost
+                    best_th = th_cand
+                    best_th_metrics = (
+                        c_tn, c_fp, c_fn, c_tp,
+                        c_tp / (c_tp + c_fn) if (c_tp + c_fn) > 0 else 0.0,
+                        c_tn / (c_tn + c_fp) if (c_tn + c_fp) > 0 else 0.0,
+                        precision_score(y_train, c_pred, zero_division=0),
+                        f1_score(y_train, c_pred, zero_division=0),
+                        accuracy_score(y_train, c_pred)
+                    )
+            
+            b_tn, b_fp, b_fn, b_tp, b_rec, b_spec, b_prec, b_f1, b_acc = best_th_metrics
+            confusion_records.append({
+                "Partition": "5-Fold CV (Optimal Cutoff)",
+                "Model": name,
+                "Cutoff_Threshold": round(float(best_th), 3),
+                "TN": int(b_tn),
+                "FP": int(b_fp),
+                "FN": int(b_fn),
+                "TP": int(b_tp),
+                "Accuracy": round(b_acc, 4),
+                "Recall_Sensitivity": round(b_rec, 4),
+                "Specificity": round(b_spec, 4),
+                "Precision": round(b_prec, 4),
+                "F1_Score": round(b_f1, 4),
+                "ROC_AUC": round(auc, 4),
+            })
+            cost_records.append({
+                "Partition": "5-Fold CV (Optimal Cutoff)",
+                "Model": name,
+                "Cutoff_Threshold": round(float(best_th), 3),
+                "False_Alarms_FP": int(b_fp),
+                "False_Alarm_Cost_EUR": int(TYPE_I_COST * b_fp),
+                "Missed_Faults_FN": int(b_fn),
+                "Missed_Fault_Cost_EUR": int(TYPE_II_COST * b_fn),
+                "Total_Inspection_Cost_EUR": int(min_c),
+                "Baseline_Flag_Nothing_EUR": baseline_cost_train,
+                "Net_Savings_EUR": int(baseline_cost_train - min_c),
+                "Economic_Status": f"EUR {abs(baseline_cost_train - min_c):,} " + ("SAVINGS" if (baseline_cost_train - min_c) >= 0 else "LOSS vs Do-Nothing"),
+            })
+
+        # 3. Held-Out Test Set Evaluation
+        if X_test_sel is not None and y_test is not None:
+            pipe.fit(X_train_sel, y_train)
+            if name == "Dummy (most_frequent)":
+                test_proba = np.zeros(len(y_test), dtype=float)
+                test_auc = 0.5
+            else:
+                test_proba = pipe.predict_proba(X_test_sel)[:, 1]
+                try:
+                    test_auc = float(roc_auc_score(y_test, test_proba))
+                except Exception:
+                    test_auc = 0.5
+            
+            baseline_cost_test = int(len(y_test[y_test == 1]) * TYPE_II_COST)
+
+            for test_cutoff in [0.50, 0.340]:
+                t_pred = (test_proba >= test_cutoff).astype(int)
+                t_cm = confusion_matrix(y_test, t_pred, labels=[0, 1])
+                t_tn, t_fp, t_fn, t_tp = t_cm.ravel()
+                t_rec = float(t_tp / (t_tp + t_fn)) if (t_tp + t_fn) > 0 else 0.0
+                t_spec = float(t_tn / (t_tn + t_fp)) if (t_tn + t_fp) > 0 else 0.0
+                t_prec = float(precision_score(y_test, t_pred, zero_division=0))
+                t_f1 = float(f1_score(y_test, t_pred, zero_division=0))
+                t_acc = float(accuracy_score(y_test, t_pred))
+                t_cost = int(TYPE_I_COST * t_fp + TYPE_II_COST * t_fn)
+                t_savings = int(baseline_cost_test - t_cost)
+
+                confusion_records.append({
+                    "Partition": f"Held-Out Test (N=314, Cutoff {test_cutoff})",
+                    "Model": name,
+                    "Cutoff_Threshold": test_cutoff,
+                    "TN": int(t_tn),
+                    "FP": int(t_fp),
+                    "FN": int(t_fn),
+                    "TP": int(t_tp),
+                    "Accuracy": round(t_acc, 4),
+                    "Recall_Sensitivity": round(t_rec, 4),
+                    "Specificity": round(t_spec, 4),
+                    "Precision": round(t_prec, 4),
+                    "F1_Score": round(t_f1, 4),
+                    "ROC_AUC": round(test_auc, 4),
+                })
+                cost_records.append({
+                    "Partition": f"Held-Out Test (N=314, Cutoff {test_cutoff})",
+                    "Model": name,
+                    "Cutoff_Threshold": test_cutoff,
+                    "False_Alarms_FP": int(t_fp),
+                    "False_Alarm_Cost_EUR": int(TYPE_I_COST * t_fp),
+                    "Missed_Faults_FN": int(t_fn),
+                    "Missed_Fault_Cost_EUR": int(TYPE_II_COST * t_fn),
+                    "Total_Inspection_Cost_EUR": t_cost,
+                    "Baseline_Flag_Nothing_EUR": baseline_cost_test,
+                    "Net_Savings_EUR": t_savings,
+                    "Economic_Status": f"EUR {abs(t_savings):,} " + ("SAVINGS" if t_savings >= 0 else "LOSS vs Do-Nothing"),
+                })
+
+        print(f" - {name:28s} | AUC: {auc:.3f} | Recall (0.50): {rec:.2%} | FP: {fp:3d} | FN: {fn:2d} | Cost: EUR {total_cost:,}", flush=True)
+
+    cm_df = pd.DataFrame(confusion_records)
+    cost_df = pd.DataFrame(cost_records)
+    rigorous_df = pd.DataFrame(rigorous_records)
+
+    # Save to BOTH data/ and results/tables/
+    cm_df.to_csv(DATA_DIR / "all_models_confusion_matrices.csv", index=False)
+    cm_df.to_csv(TABLE_DIR / "all_models_confusion_matrices.csv", index=False)
+    cost_df.to_csv(DATA_DIR / "all_models_cost_matrices.csv", index=False)
+    cost_df.to_csv(TABLE_DIR / "all_models_cost_matrices.csv", index=False)
+    rigorous_df.to_csv(TABLE_DIR / "rigorous_model_comparison.csv", index=False)
+
+    print(f"\n[Model Comparison] Saved all models confusion & cost matrices to {DATA_DIR} and {TABLE_DIR}", flush=True)
+    return rigorous_df
 
 
 # ===========================================================================
@@ -874,7 +1053,7 @@ def main():
     compare_feature_selection(X_train_imputed, X_train_sel, y_train, cv)
 
     # 9. Candidate Models Baseline Comparison (Section 11)
-    compare_candidate_models(X_train_sel, y_train, cv)
+    compare_candidate_models(X_train_sel, y_train, cv, X_test_sel, y_test)
 
     # 10. Hyperparameter Tuning via GridSearchCV (Section 12)
     print("\n[Phase 4] Hyperparameter Tuning via Stratified 5-Fold GridSearchCV (Section 12)...", flush=True)

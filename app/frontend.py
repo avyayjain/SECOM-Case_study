@@ -63,7 +63,13 @@ def load_local_csv(filename: str):
         try:
             return pd.read_csv(path)
         except Exception:
-            return None
+            pass
+    data_path = Path(__file__).resolve().parent.parent / "data" / filename
+    if data_path.exists():
+        try:
+            return pd.read_csv(data_path)
+        except Exception:
+            pass
     return None
 
 
@@ -570,27 +576,163 @@ st.markdown(
 if st.button("Run Step 4: Load model comparisons & tuning", key="step4"):
     run_stage("historical model comparison", "/case-study/experiments")
     run_stage("hyperparameter grid search", "/case-study/grid-search")
+    run_stage("all models matrices", "/case-study/all-models-matrices")
 
 experiments = get_stage("/case-study/experiments")
 
 if experiments:
     experiment_df = pd.DataFrame(experiments["results"])
 
-    st.subheader("Candidate Model Comparison (Stratified 5-Fold CV)")
+    st.subheader("Candidate Model Benchmark (Stratified 5-Fold CV)")
+    st.caption("Benchmarked across 5-fold cross-validation with SMOTE applied strictly inside each training fold (per Slide 17 & 20):")
     st.dataframe(experiment_df, use_container_width=True, hide_index=True)
 
     # Plotly bar chart
     fig = px.bar(
         experiment_df,
         x="model",
-        y="mean_recall",
-        error_y="std_recall" if "std_recall" in experiment_df.columns else None,
+        y="mean_recall" if "mean_recall" in experiment_df.columns else "recall",
         color="model",
         text_auto=".2%",
-        title="Candidate Models: Minority Class Recall (5-Fold CV)",
+        title="Candidate Models: Minority Class Recall (5-Fold CV, Cutoff 0.50)",
         labels={"model": "Model", "mean_recall": "Mean Recall"},
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    # =========================================================
+    # All Models Confusion and Cost Matrix Explorer
+    # =========================================================
+    st.divider()
+    st.subheader("Model Confusion & Cost Matrix Explorer (All Models in Data Folder)")
+    st.caption("Organically generated 2×2 confusion matrices and EUR (€) cost matrices for every evaluated algorithm:")
+
+    all_cm_df = load_local_csv("all_models_confusion_matrices.csv")
+    all_cost_df = load_local_csv("all_models_cost_matrices.csv")
+
+    if all_cm_df is not None and not all_cm_df.empty:
+        model_list = sorted(list(all_cm_df["Model"].unique()))
+        rf_idx = model_list.index("Random Forest") if "Random Forest" in model_list else 0
+
+        col_m_sel, col_p_sel = st.columns([1.2, 1.0])
+        with col_m_sel:
+            selected_model = st.selectbox(
+                "Select Algorithm to inspect:",
+                options=model_list,
+                index=rf_idx,
+                key="cm_explorer_model",
+            )
+        with col_p_sel:
+            part_options = list(all_cm_df[all_cm_df["Model"] == selected_model]["Partition"].unique())
+            selected_part = st.selectbox(
+                "Evaluation Partition & Cutoff:",
+                options=part_options,
+                index=0,
+                key="cm_explorer_part",
+            )
+
+        # Filter selected row
+        cm_row = all_cm_df[(all_cm_df["Model"] == selected_model) & (all_cm_df["Partition"] == selected_part)]
+        cost_row = all_cost_df[(all_cost_df["Model"] == selected_model) & (all_cost_df["Partition"] == selected_part)] if all_cost_df is not None else None
+
+        if not cm_row.empty:
+            r = cm_row.iloc[0]
+            tn_m = int(r["TN"])
+            fp_m = int(r["FP"])
+            fn_m = int(r["FN"])
+            tp_m = int(r["TP"])
+            cutoff_val = r["Cutoff_Threshold"]
+            rec_val = r["Recall_Sensitivity"]
+            prec_val = r["Precision"]
+            f1_val = r["F1_Score"]
+            auc_val = r["ROC_AUC"]
+
+            cost_fp_m = fp_m * 100
+            cost_fn_m = fn_m * 400
+            tot_cost_m = cost_fp_m + cost_fn_m
+
+            # 4 metric widgets
+            m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+            m_c1.metric("True Negatives (TN)", f"{tn_m}", f"{r['Specificity']*100:.1f}% Specificity")
+            m_c2.metric("False Positives (FP)", f"{fp_m}", f"Cost: €{cost_fp_m:,}")
+            m_c3.metric("False Negatives (FN)", f"{fn_m}", f"Cost: €{cost_fn_m:,}")
+            m_c4.metric("True Positives (TP)", f"{tp_m}", f"{rec_val*100:.1f}% Recall")
+
+            col_hm, col_ct = st.columns([1.1, 1.0])
+            with col_hm:
+                # Plotly Heatmap with crisp annotations
+                z_m = [[tn_m, fp_m], [fn_m, tp_m]]
+                fig_m = go.Figure(data=go.Heatmap(
+                    z=z_m,
+                    x=["Predicted Pass", "Predicted Defect"],
+                    y=["Actual Pass", "Actual Defect"],
+                    colorscale=[[0, "#eff6ff"], [0.3, "#93c5fd"], [0.7, "#2563eb"], [1, "#1d4ed8"]],
+                    showscale=False,
+                    hoverinfo="text",
+                    hovertext=[
+                        [f"Actual Pass → Predicted Pass: {tn_m} wafers (Pass Cleared, Cost: €0)",
+                         f"Actual Pass → Predicted Defect: {fp_m} wafers (False Alarm, Cost: €{cost_fp_m:,})"],
+                        [f"Actual Defect → Predicted Pass: {fn_m} wafers (Missed Fault, Cost: €{cost_fn_m:,})",
+                         f"Actual Defect → Predicted Defect: {tp_m} wafers (Caught Fault, {rec_val*100:.1f}% Recall)"]
+                    ]
+                ))
+                annotations_m = [
+                    dict(x="Predicted Pass", y="Actual Pass", text=f"<b>TN: {tn_m}</b><br>Pass Cleared (€0)", showarrow=False, font=dict(color="#ffffff", size=13)),
+                    dict(x="Predicted Defect", y="Actual Pass", text=f"<b>FP: {fp_m}</b><br>False Alarm (€{cost_fp_m:,})", showarrow=False, font=dict(color="#0f172a", size=13)),
+                    dict(x="Predicted Pass", y="Actual Defect", text=f"<b>FN: {fn_m}</b><br>Missed Defect (€{cost_fn_m:,})", showarrow=False, font=dict(color="#0f172a", size=13)),
+                    dict(x="Predicted Defect", y="Actual Defect", text=f"<b>TP: {tp_m}</b><br>Caught ({rec_val*100:.1f}%)", showarrow=False, font=dict(color="#0f172a", size=13)),
+                ]
+                fig_m.update_layout(
+                    title=dict(text=f"{selected_model} Confusion Matrix ({selected_part})", font=dict(size=14)),
+                    annotations=annotations_m,
+                    height=260,
+                    margin=dict(l=20, r=20, t=35, b=20),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                )
+                fig_m.update_yaxes(autorange="reversed")
+                st.plotly_chart(fig_m, use_container_width=True)
+
+            with col_ct:
+                st.caption(f"Economic Cost Matrix (EUR €) for {selected_model}:")
+                base_cost = 33200 if "Train" in selected_part else 8400
+                savings = base_cost - tot_cost_m
+
+                cost_table_df = pd.DataFrame([
+                    {"Cost Component": "False Alarms (Type I @ €100 ea)", "Count": fp_m, "Impact (EUR)": f"€{cost_fp_m:,}"},
+                    {"Cost Component": "Missed Faults (Type II @ €400 ea)", "Count": fn_m, "Impact (EUR)": f"€{cost_fn_m:,}"},
+                    {"Cost Component": "Total Inspection Cost", "Count": fp_m + fn_m, "Impact (EUR)": f"€{tot_cost_m:,}"},
+                    {"Cost Component": "Baseline 'Flag Nothing' Cost", "Count": 83 if "Train" in selected_part else 21, "Impact (EUR)": f"€{base_cost:,}"},
+                    {"Cost Component": "Net Economic Savings vs Do-Nothing", "Count": "-", "Impact (EUR)": f"€{savings:,}" if savings >= 0 else f"-€{abs(savings):,} (Loss)"},
+                ])
+                st.dataframe(cost_table_df, use_container_width=True, hide_index=True)
+
+                c_info1, c_info2 = st.columns(2)
+                c_info1.metric("ROC-AUC", f"{auc_val:.3f}", f"Precision: {prec_val*100:.1f}%")
+                c_info2.metric("Total Cost", f"€{tot_cost_m:,}", f"Net: €{savings:,}" if savings >= 0 else f"-€{abs(savings):,}")
+
+        # Expanders with all models comparison tables
+        with st.expander("📋 View Complete Confusion Matrix Table (All 8 Models × All Partitions)"):
+            st.dataframe(all_cm_df, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download Confusion Matrices CSV (from data folder)",
+                data=all_cm_df.to_csv(index=False).encode("utf-8"),
+                file_name="all_models_confusion_matrices.csv",
+                mime="text/csv",
+                key="download_all_cm_csv",
+            )
+
+        if all_cost_df is not None and not all_cost_df.empty:
+            with st.expander("💶 View Complete Economic Cost Matrix Table (All 8 Models × All Partitions)"):
+                st.dataframe(all_cost_df, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Download Cost Matrices CSV (from data folder)",
+                    data=all_cost_df.to_csv(index=False).encode("utf-8"),
+                    file_name="all_models_cost_matrices.csv",
+                    mime="text/csv",
+                    key="download_all_cost_csv",
+                )
+
+    st.divider()
 
     # Hyperparameter tuning results
     grid_data = get_stage("/case-study/grid-search")

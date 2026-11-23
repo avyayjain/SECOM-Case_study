@@ -1,6 +1,9 @@
-model,mean_recall,std_recall,mean_f1,std_f1
-Dummy (most_frequent),0.0,0.0,0.0,0.0
-Logistic Regression,0.5779,0.0766,0.2167,0.0276
-Random Forest,0.1566,0.0602,0.1643,0.0556
-Support Vector Machine (SVC),0.4096,0.0199,0.199,0.0096
-XGBoost,0.2169,0.0957,0.2116,0.0792
+model,roc_auc,mean_recall,precision,mean_f1,missed_faults,false_alarms,total_cost_eur
+Random Forest,0.7532,0.3735,0.1902,0.252,52,132,34000
+SVM (RBF),0.6589,0.4699,0.1147,0.1844,44,301,47700
+LightGBM-style,0.7572,0.2048,0.2048,0.2048,66,66,33000
+Gradient Boosting,0.733,0.2892,0.1491,0.1967,59,137,37300
+Logistic Regression,0.7212,0.6024,0.1276,0.2105,33,342,47400
+KNN (k = 31),0.6253,0.5783,0.0992,0.1693,35,436,57600
+XGBoost,0.7499,0.2289,0.1919,0.2088,64,80,33600
+Dummy (most_frequent),0.5,0.0,0.0,0.0,83,0,33200

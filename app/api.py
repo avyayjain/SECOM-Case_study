@@ -363,6 +363,26 @@ def experiments():
     }
 
 
+@app.get("/case-study/all-models-matrices")
+def all_models_matrices():
+    """Return confusion and cost matrices for all candidate models across partitions."""
+    cm_records = load_csv_table("all_models_confusion_matrices.csv")
+    cost_records = load_csv_table("all_models_cost_matrices.csv")
+    if not cm_records:
+        data_cm_file = DATA_PATH.parent / "all_models_confusion_matrices.csv"
+        if data_cm_file.exists():
+            cm_records = pd.read_csv(data_cm_file).to_dict(orient="records")
+    if not cost_records:
+        data_cost_file = DATA_PATH.parent / "all_models_cost_matrices.csv"
+        if data_cost_file.exists():
+            cost_records = pd.read_csv(data_cost_file).to_dict(orient="records")
+    return {
+        "title": "All Models Confusion and Cost Matrices",
+        "confusion_matrices": cm_records if cm_records else [],
+        "cost_matrices": cost_records if cost_records else [],
+    }
+
+
 @app.get("/case-study/grid-search")
 def grid_search():
     """Return GridSearchCV tuning progression on Random Forest."""
